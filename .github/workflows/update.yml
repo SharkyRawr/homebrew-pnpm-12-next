@@ -1,0 +1,41 @@
+name: Update formula
+
+on:
+  schedule:
+    - cron: "0 5 * * *" # daily, 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check latest version
+        id: check
+        run: |
+          latest=$(curl -fsSL https://registry.npmjs.org/pnpm/next-12 | jq -r .version)
+          current=$(grep -oE 'pnpm-[0-9.]+\.tgz' Formula/pnpm@12.rb | head -1 | sed 's/pnpm-//;s/\.tgz//')
+          echo "current=$current latest=$latest"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          [ "$current" != "$latest" ] && echo "update=yes" >> "$GITHUB_OUTPUT" || echo "update=no" >> "$GITHUB_OUTPUT"
+
+      - name: Update formula
+        if: steps.check.outputs.update == 'yes'
+        run: |
+          v="${{ steps.check.outputs.latest }}"
+          sha=$(curl -fsSL "https://registry.npmjs.org/pnpm/-/pnpm-$v.tgz" | sha256sum | cut -d' ' -f1)
+          sed -i "s|pnpm-[0-9.]*\.tgz|pnpm-$v.tgz|" Formula/pnpm@12.rb
+          sed -i "s|sha256 \"[0-9a-f]*\"|sha256 \"$sha\"|" Formula/pnpm@12.rb
+
+      - name: Commit and push
+        if: steps.check.outputs.update == 'yes'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/pnpm@12.rb
+          git commit -m "pnpm@12 ${{ steps.check.outputs.latest }}"
+          git push
